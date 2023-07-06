@@ -1,0 +1,12 @@
+# macOS
+.DS_Store
+
+# JetBrains
+.idea/
+*.iml
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate*
+secret.tfvars
