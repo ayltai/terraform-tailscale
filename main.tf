@@ -140,6 +140,136 @@ resource "aws_instance" "this" {
   }
 }
 
+resource "aws_iam_role" "lambda" {
+  name               = "tailscale"
+  assume_role_policy = data.aws_iam_policy_document.lambda.json
+}
+
+resource "aws_iam_policy" "lambda" {
+  name   = "tailscale-lambda"
+  path   = "/"
+  policy = data.aws_iam_policy_document.instance.json
+}
+
+resource "aws_iam_policy" "cloudwatch" {
+  name   = "tailscale-cloudwatch"
+  path   = "/"
+  policy = data.aws_iam_policy_document.cloudwatch.json
+}
+
+resource "aws_iam_role_policy_attachment" "lambda" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = aws_iam_policy.lambda.arn
+}
+
+resource "aws_iam_role_policy_attachment" "cloudwatch" {
+  role       = aws_iam_role.lambda.name
+  policy_arn = aws_iam_policy.cloudwatch.arn
+}
+
+resource "aws_cloudwatch_log_group" "start_instance" {
+  name              = "/aws/lambda/${var.server_hostname}-${var.aws_region}-start-instance"
+  retention_in_days = var.log_retention
+}
+
+resource "aws_cloudwatch_log_group" "stop_instance" {
+  name              = "/aws/lambda/${var.server_hostname}-${var.aws_region}-stop-instance"
+  retention_in_days = var.log_retention
+}
+
+resource "aws_cloudwatch_event_rule" "start_instance" {
+  name                = "${var.server_hostname}-${var.aws_region}-start-instance"
+  schedule_expression = var.server_start_expression
+}
+
+resource "aws_cloudwatch_event_rule" "stop_instance" {
+  name                = "${var.server_hostname}-${var.aws_region}-stop-instance"
+  schedule_expression = var.server_stop_expression
+}
+
+resource "aws_s3_bucket" "this" {
+  bucket        = "${var.server_hostname}-${var.aws_region}"
+  force_destroy = true
+}
+
+resource "aws_s3_object" "start_instance" {
+  bucket = aws_s3_bucket.this.id
+  key    = "start_instance.zip"
+  source = data.archive_file.start_instance.output_path
+}
+
+resource "aws_s3_object" "stop_instance" {
+  bucket = aws_s3_bucket.this.id
+  key    = "stop_instance.zip"
+  source = data.archive_file.stop_instance.output_path
+}
+
+resource "aws_lambda_function" "start_instance" {
+  function_name = "${var.server_hostname}-${var.aws_region}-start-instance"
+  role          = aws_iam_role.lambda.arn
+  s3_bucket     = aws_s3_bucket.this.id
+  s3_key        = aws_s3_object.start_instance.id
+  handler       = "start_instance.handler"
+  runtime       = "nodejs16.x"
+  memory_size   = 128
+  timeout       = 60
+
+  architectures = [
+    "arm64",
+  ]
+
+  depends_on = [
+    aws_cloudwatch_log_group.start_instance,
+  ]
+}
+
+resource "aws_lambda_function" "stop_instance" {
+  function_name = "${var.server_hostname}-${var.aws_region}-stop-instance"
+  role          = aws_iam_role.lambda.arn
+  s3_bucket     = aws_s3_bucket.this.id
+  s3_key        = aws_s3_object.stop_instance.id
+  handler       = "stop_instance.handler"
+  runtime       = "nodejs16.x"
+  memory_size   = 128
+  timeout       = 60
+
+  architectures = [
+    "arm64",
+  ]
+
+  depends_on = [
+    aws_cloudwatch_log_group.stop_instance,
+  ]
+}
+
+resource "aws_cloudwatch_event_target" "start_instance" {
+  rule      = aws_cloudwatch_event_rule.start_instance.name
+  target_id = aws_cloudwatch_event_rule.start_instance.name
+  arn       = aws_lambda_function.start_instance.arn
+}
+
+resource "aws_cloudwatch_event_target" "stop_instance" {
+  rule      = aws_cloudwatch_event_rule.stop_instance.name
+  target_id = aws_cloudwatch_event_rule.stop_instance.name
+  arn       = aws_lambda_function.stop_instance.arn
+}
+
+resource "aws_lambda_permission" "start_instance" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  principal     = "events.amazonaws.com"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.start_instance.function_name
+  source_arn    = aws_cloudwatch_event_rule.start_instance.arn
+}
+
+resource "aws_lambda_permission" "stop_instance" {
+  statement_id  = "AllowExecutionFromCloudWatch"
+  principal     = "events.amazonaws.com"
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.stop_instance.function_name
+  source_arn    = aws_cloudwatch_event_rule.stop_instance.arn
+}
+
 resource "tailscale_tailnet_key" "this" {
   reusable      = true
   preauthorized = true
