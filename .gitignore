@@ -9,4 +9,5 @@
 .terraform/
 *.tfstate
 *.tfstate*
+*.lock.hcl
 secret.tfvars

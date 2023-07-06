@@ -50,6 +50,24 @@ variable "server_hostname" {
   default     = "vpn"
 }
 
+variable "server_start_expression" {
+  description = "Server start schedule expression"
+  type        = string
+  default     = "cron(0 10 * * ? *)"
+}
+
+variable "server_stop_expression" {
+  description = "Server stop schedule expression"
+  type        = string
+  default     = "cron(0 1 * * ? *)"
+}
+
+variable "log_retention" {
+  description = "CloudWatch log retention"
+  type        = number
+  default     = 14
+}
+
 variable "tailscale_api_key" {
   description = "Tailscale API access token"
   type        = string
